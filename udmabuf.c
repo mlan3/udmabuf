@@ -84,7 +84,7 @@ struct udmabuf_driver_data {
     void*                virt_addr;
     dma_addr_t           phys_addr;
 #if (SYNC_ENABLE == 1)
-    bool                 sync_mode;
+    int                  sync_mode;
 #endif
 #if ((UDMABUF_DEBUG == 1) && (SYNC_ENABLE == 1))
     bool                 debug_vma;
@@ -118,7 +118,7 @@ static ssize_t udmabuf_set_ ## __attr_name(struct device *dev, struct device_att
     unsigned long value;  \
     struct udmabuf_driver_data* this = dev_get_drvdata(dev);                 \
     if (0 != mutex_lock_interruptible(&this->sem)){return -ERESTARTSYS;}     \
-    if (0 != (status = strict_strtoul(buf, 10, &value))) {     goto failed;} \
+    if (0 != (status = kstrtoul(buf, 10, &value))) {     goto failed;} \
     if ((value < __min) || (__max < value)) {status = -EINVAL; goto failed;} \
     if (0 != (status = __pre_action )) {                       goto failed;} \
     this->__attr_name = value;                                               \
@@ -130,7 +130,7 @@ static ssize_t udmabuf_set_ ## __attr_name(struct device *dev, struct device_att
 }
 
 DEF_ATTR_SHOW(size      , "%d\n"   , this->size      );
-DEF_ATTR_SHOW(phys_addr , "0x%lx\n", this->phys_addr );
+DEF_ATTR_SHOW(phys_addr , "0x%lx\n", (long unsigned int)this->phys_addr );
 #if (SYNC_ENABLE == 1)
 DEF_ATTR_SHOW(sync_mode , "%d\n"   , this->sync_mode );
 DEF_ATTR_SET( sync_mode            , 0, 3, 0, 0      );
@@ -140,7 +140,7 @@ DEF_ATTR_SHOW(debug_vma , "%d\n"   , this->debug_vma );
 DEF_ATTR_SET( debug_vma            , 0, 1, 0, 0      );
 #endif
 
-static const struct device_attribute udmabuf_device_attrs[] = {
+static struct device_attribute udmabuf_device_attrs[] = {
   __ATTR(size      , 0644, udmabuf_show_size      , NULL),
   __ATTR(phys_addr , 0644, udmabuf_show_phys_addr , NULL),
 #if (SYNC_ENABLE == 1)
@@ -152,6 +152,23 @@ static const struct device_attribute udmabuf_device_attrs[] = {
   __ATTR_NULL,
 };
 
+static struct attribute *udmabuf_attrs[] = {
+  &(udmabuf_device_attrs[0].attr),
+  &(udmabuf_device_attrs[1].attr),
+#if (UDMABUF_DEBUG == 1)
+  &(udmabuf_device_attrs[2].attr),
+#endif
+  NULL,
+};
+
+static struct attribute_group udmabuf_attr_group = {
+  .attrs = udmabuf_attrs,
+};
+
+static const struct attribute_group *udmabuf_attr_groups[] = {
+  &udmabuf_attr_group,
+  NULL
+};
 
 #if (SYNC_ENABLE == 1)
 /**
@@ -199,7 +216,7 @@ static int udmabuf_driver_vma_fault(struct vm_area_struct* vma, struct vm_fault*
     unsigned long available_size     = this->alloc_size -offset;
 
     if (UDMABUF_DEBUG_CHECK(this, debug_vma))
-        dev_info(this->device, "vma_fault(virt_addr=0x%lx, phys_addr=0x%lx)\n", vmf->virtual_address, phys_addr);
+        dev_info(this->device, "vma_fault(virt_addr=0x%lx, phys_addr=0x%lx)\n", (long unsigned int)vmf->virtual_address, phys_addr);
 
     if (request_size > available_size) 
         return VM_FAULT_SIGBUS;
@@ -376,7 +393,7 @@ static struct udmabuf_driver_data* udmabuf_driver_create(int minor, unsigned int
     {
         this->device_number = MKDEV(MAJOR(udmabuf_device_number), minor);
         this->size          = size;
-        this->alloc_size    = (size + ((1 << PAGE_SHIFT) - 1) >> PAGE_SHIFT) << PAGE_SHIFT;
+        this->alloc_size    = ((size + ((1 << PAGE_SHIFT) - 1)) >> PAGE_SHIFT) << PAGE_SHIFT;
     }
 #if (SYNC_ENABLE == 1)
     {
@@ -438,7 +455,7 @@ static struct udmabuf_driver_data* udmabuf_driver_create(int minor, unsigned int
     dev_info(this->device, "driver installed\n");
     dev_info(this->device, "major number   = %d\n"    , MAJOR(this->device_number));
     dev_info(this->device, "minor number   = %d\n"    , MINOR(this->device_number));
-    dev_info(this->device, "phys address   = 0x%lx\n" , this->phys_addr);
+    dev_info(this->device, "phys address   = 0x%lx\n" , (long unsigned int)this->phys_addr);
     dev_info(this->device, "buffer size    = %d\n"    , this->alloc_size);
 
     return this;
@@ -641,7 +658,7 @@ static int __init udmabuf_module_init(void)
         udmabuf_sys_class = NULL;
         goto failed;
     }
-    udmabuf_sys_class->dev_attrs = udmabuf_device_attrs;
+    udmabuf_sys_class->dev_groups = udmabuf_attr_groups;
 
     CREATE_UDMABUF_DRIVER(0);
     CREATE_UDMABUF_DRIVER(1);
