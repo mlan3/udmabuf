@@ -55,6 +55,7 @@
 #include <asm/page.h>
 #include <asm/byteorder.h>
 
+#define VERSION_LATER_3_13
 
 #define DRIVER_NAME        "udmabuf"
 #define DEVICE_NAME_FORMAT "udmabuf%d"
@@ -111,6 +112,12 @@ static ssize_t udmabuf_show_ ## __attr_name(struct device *dev, struct device_at
     return status;                                           \
 }
 
+#ifdef VERSION_LATER_3_13
+#define STRTOUL(__buf, __size, __value) kstrtoul(__buf, __size, __value)
+#else
+#define STRTOUL(__buf, __size, __value) strict_strtoul(__buf, __size, __value)
+#endif
+
 #define DEF_ATTR_SET(__attr_name, __min, __max, __pre_action, __post_action) \
 static ssize_t udmabuf_set_ ## __attr_name(struct device *dev, struct device_attribute *attr, const char *buf, size_t size) \
 { \
@@ -118,7 +125,7 @@ static ssize_t udmabuf_set_ ## __attr_name(struct device *dev, struct device_att
     unsigned long value;  \
     struct udmabuf_driver_data* this = dev_get_drvdata(dev);                 \
     if (0 != mutex_lock_interruptible(&this->sem)){return -ERESTARTSYS;}     \
-    if (0 != (status = kstrtoul(buf, 10, &value))) {     goto failed;} \
+    if (0 != (status = STRTOUL(buf, 10, &value))) {     goto failed;} \
     if ((value < __min) || (__max < value)) {status = -EINVAL; goto failed;} \
     if (0 != (status = __pre_action )) {                       goto failed;} \
     this->__attr_name = value;                                               \
@@ -140,7 +147,11 @@ DEF_ATTR_SHOW(debug_vma , "%d\n"   , this->debug_vma );
 DEF_ATTR_SET( debug_vma            , 0, 1, 0, 0      );
 #endif
 
+#ifdef VERSION_LATER_3_13
 static struct device_attribute udmabuf_device_attrs[] = {
+#else
+static const struct device_attribute udmabuf_device_attrs[] = {
+#endif
   __ATTR(size      , 0644, udmabuf_show_size      , NULL),
   __ATTR(phys_addr , 0644, udmabuf_show_phys_addr , NULL),
 #if (SYNC_ENABLE == 1)
@@ -152,11 +163,15 @@ static struct device_attribute udmabuf_device_attrs[] = {
   __ATTR_NULL,
 };
 
+#ifdef VERSION_LATER_3_13
 static struct attribute *udmabuf_attrs[] = {
   &(udmabuf_device_attrs[0].attr),
   &(udmabuf_device_attrs[1].attr),
-#if (UDMABUF_DEBUG == 1)
+#if (SYNC_ENABLE == 1)
   &(udmabuf_device_attrs[2].attr),
+#endif
+#if ((UDMABUF_DEBUG == 1) && (SYNC_ENABLE == 1))
+  &(udmabuf_device_attrs[3].attr),
 #endif
   NULL,
 };
@@ -169,6 +184,7 @@ static const struct attribute_group *udmabuf_attr_groups[] = {
   &udmabuf_attr_group,
   NULL
 };
+#endif
 
 #if (SYNC_ENABLE == 1)
 /**
@@ -658,7 +674,11 @@ static int __init udmabuf_module_init(void)
         udmabuf_sys_class = NULL;
         goto failed;
     }
+#ifdef VERSION_LATER_3_13
     udmabuf_sys_class->dev_groups = udmabuf_attr_groups;
+#else
+    udmabuf_sys_class->dev_attrs = udmabuf_device_attrs;
+#endif
 
     CREATE_UDMABUF_DRIVER(0);
     CREATE_UDMABUF_DRIVER(1);
